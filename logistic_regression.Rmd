@@ -1,0 +1,31 @@
+---
+title: "logistic Regression"
+author: "Nafisah Adams"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readxl)
+data<-read_excel("C:\\Users\\PC\\Desktop\\spring2025\\Student health survey data.xlsx")
+head(data)
+tail(data)
+na.omit(data)
+library(dplyr)
+data <- data %>% filter(medication %in% c(1, 2))
+
+# Omit the last row
+data <- data[-nrow(data), ]
+data$medication[data$medication == 2] <- 0
+
+
+```
+
+```{r}
+model1<-glm(medication ~ .,family = "binomial",data=data)
+summary(model1)
+```

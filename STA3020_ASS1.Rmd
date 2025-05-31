@@ -1,0 +1,98 @@
+---
+title: "Linear Combinations"
+author: "Nafisah Adams"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+**Define the variables and coefficients: Create vectors for the random variables X1,X2,...,Xp and coefficients c1,c2,...,cp.**
+
+To define the variables and the coefficients, i decided to choose five coefficients by defining my p as 5, went ahead to set the seed for reproducibility, then i used the matrix function to generate a matrix with random values.
+
+After that i generated my fixed coefficients then printed out the result.
+
+```{r}
+
+p <- 5  
+
+set.seed(123)  
+X_samples <- matrix(c(5, 7, 8, 6, 5, 9, 8, 7, 6, 7,
+                      4, 5, 6, 5, 6, 7, 8, 9, 5, 6,
+                      8, 7, 6, 5, 4, 7, 6, 8, 5, 6,
+                      7, 8, 9, 6, 5, 5, 6, 7, 8, 5,
+                      6, 5, 7, 8, 9, 4, 5, 6, 5, 7),
+                    nrow = 10, ncol = p, byrow = FALSE)
+
+
+c <- c(2, 3, 4,1,5)
+cat("Random Variables Dataset (X_samples):\n")
+print(X_samples)
+cat("\nCoefficients (c):\n")
+print(c)
+
+```
+
+**Compute the linear combination: Use vector multiplication to compute the linear combination Y=(c1×X1)+(c2×X2)+⋯+(cp×Xp).**
+
+To compute the linear combinations, i multiplied the matrix which i named as the X_samples by the coefficients c,
+
+then printed the results
+
+```{r}
+Y <- X_samples %*% c
+
+cat("Linear Combination (Y):\n")
+print(Y)
+
+```
+
+**Calculate the sample mean: Compute the sample mean of the linear combination using the sample means of the component variables.**
+
+to compute the sample mean of the linear combinations using the sample mean of the component variables, we will first have to calculate the mean of the component variables by using the colMeans function in r on our matrix, using the result from the above, we can now calculate the sample mean of the linear combinations by taking the sum of the product of the coefficients by the means of the component variables.
+
+```{r}
+X_means <- colMeans(X_samples)
+Y_mean <- sum(c * X_means)
+cat("Sample Means of Component Variables (X_means):\n")
+print(X_means)
+cat("\nSample Mean of Linear Combination (Y_mean):\n")
+print(Y_mean)
+
+```
+
+**Calculate the sample variance: Compute the sample variance of the linear combination using the sample variances and covariances of the component variables.**
+
+To compute the sample variance of the linear combination using the sample variance and covariance of the component variables, first compute the covariance matrix of x_samples using the cov function in r, secondly compute the sample variance of the linear combinations. This will give as a contrivance matrix and the sample variance of linear combinations
+
+```{r}
+cov_matrix <- cov(X_samples)
+
+var_Y <- t(c) %*% cov_matrix %*% c
+cat("Covariance Matrix of Component Variables (X_samples):\n")
+print(cov_matrix)
+cat("\nSample Variance of Linear Combination (Var(Y)):\n")
+print(var_Y)
+
+```
+
+**Calculate the sample covariance and correlation: Compute the sample covariance and correlation between two linear combinations using the sample co-variances of the component variables.**
+
+First define the two sets of coefficients for the linear combinations which is c1 and c2, then compute the covariance between y1 and y2 using the covariance matrix created above, thirdly we compute the variance of y1 and y2 using their respective coeffients c1 and c2, their transpose and the covariance matrix. Lastly i computed the correlation between y1 and y2 using the covariance of y1 and y2 and the square roo of the product of the variance of y1 and y2 and then print out their result.
+
+```{r}
+c1 <- c(2, 3, 4, 1, 5) 
+c2 <- c(1, 2, 3, 4, 2)  
+
+cov_Y1_Y2 <- t(c1) %*% cov_matrix %*% c2
+
+var_Y1 <- t(c1) %*% cov_matrix %*% c1
+var_Y2 <- t(c2) %*% cov_matrix %*% c2
+
+corr_Y1_Y2 <- cov_Y1_Y2 / sqrt(var_Y1 * var_Y2)
+
+cat("Sample Covariance between Y1 and Y2:\n")
+print(cov_Y1_Y2)
+cat("\nSample Correlation between Y1 and Y2:\n")
+print(corr_Y1_Y2)
+
+```

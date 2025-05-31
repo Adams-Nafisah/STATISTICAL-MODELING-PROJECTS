@@ -1,0 +1,669 @@
+---
+title: "SAR"
+author: "Nafisah Adams"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(sf)           # For shapefiles
+library(spdep)        # For spatial weights and spatial regression
+library(dplyr)        # For data manipulation
+library(readr)
+library(tmap)
+```
+
+```{r}
+# Read the shapefile
+kenya_boundaries <- st_read("C:\\Users\\PC\\Desktop\\spring2025\\ken_adm_iebc_20191031_shp\\ken_admbnda_adm2_iebc_20191031.shx")
+View(kenya_boundaries)
+
+nairobi_boundaries <- kenya_boundaries %>% 
+  filter(ADM1_EN == "Nairobi")
+#View(nairobi_boundaries)
+
+# Read the dataset
+data <- read.csv("C:\\Users\\PC\\Downloads\\combined_data_1.csv")
+head(data)
+# Encode ordinal variables
+ordinal_levels <- c("Very Low", "Low", "Medium", "High", "Very High")
+data$y   <- as.numeric(factor(data$y, levels = ordinal_levels))
+data$y_11   <- as.numeric(factor(data$y_11, levels = ordinal_levels))
+data$y_12   <- as.numeric(factor(data$y_12, levels = ordinal_levels))
+data$y_13   <- as.numeric(factor(data$y_13, levels = ordinal_levels))
+data$x_1 <- as.numeric(factor(data$x_1, levels = ordinal_levels))
+data$x_2 <- as.numeric(factor(data$x_2, levels = ordinal_levels))
+data$x_3 <- as.numeric(factor(data$x_3, levels = ordinal_levels))
+
+# Binary encoding
+data$x_4 <- ifelse(data$x_4 == "Yes", 1, 0)
+data$x_6 <- ifelse(data$x_6 == "Online business", 1, 0)
+library(dplyr)
+
+# Rename the columns
+data <- data %>%
+  rename(
+    Access = y_11,
+    Openness = y_12,
+    Coping = y_13,
+    Adoption = y,
+    ICTComp = x_1,
+    Trainedu = x_2,
+    Mdigtech = x_3,
+    Newtech = x_4,
+    Techemployees = x_5,
+    Moperate = x_6,
+    Fininstmain = x_8,
+    Finbarrier = x_9
+  )
+
+# Check the updated column names
+colnames(data)
+head(data)
+```
+
+```{r}
+# Group Embakasi sub-counties together
+nairobi_boundaries <- nairobi_boundaries %>%
+  mutate(ADM2_EN = ifelse(grepl("Embakasi", ADM2_EN), "Embakasi", ADM2_EN))
+
+# Merge Embakasi polygons
+nairobi_grouped <- nairobi_boundaries %>%
+  group_by(ADM2_EN) %>%
+  summarise(geometry = st_union(geometry)) %>%
+  ungroup()
+print(colnames(nairobi_grouped))
+library(tmap)
+library(dplyr)
+
+# Join with the dataset
+nairobi_grouped <- nairobi_grouped %>%
+  left_join(data, by = "ADM2_EN")
+tm_shape(nairobi_grouped) +
+  tm_fill(
+    col = "Adoption",
+    fill.scale = tm_scale(values = "Blues"),
+    fill.legend = tm_legend(title = "Access to New Tech (Adoption)"),
+    colorNA = "lightgrey"  # Custom color for NA
+  ) +
+  tm_borders() +
+  tm_text("ADM2_EN", size = 0.7) + 
+  tm_title("Map of Adoption of New Tech Knowlogy")
+
+```
+
+```{r}
+# Set tmap options to prevent autoscaling warnings
+tmap_options(component.autoscale = FALSE)
+
+# Function to create maps with a shouting color
+create_map <- function(var, title) {
+  tm_shape(nairobi_grouped) +
+    tm_fill(
+      col = var,
+      palette = "Reds",  
+      legend.title = title,
+      colorNA = "black"  # Make missing values stand out
+    ) +
+    tm_borders() +
+    tm_text("ADM2_EN", size = 0.7, col = "white", fontface = "bold") + 
+    tm_title(paste("Map of", title), size = 1.5)
+}
+
+# Filter out unwanted districts
+nairobi_grouped <- nairobi_grouped %>%
+  filter(!ADM2_EN %in% c("Makadara", "Kibra"))
+
+# Create maps for each variable
+map_Adoption <- create_map("Adoption", "Adoption of New Technology")
+map_Access <- create_map("Access", "Access to New Technology")
+map_Openness <- create_map("Openness", "Openness to New Technology")
+map_Coping <- create_map("Coping", "Coping with Modern Technology")
+
+# Arrange maps side by side
+tmap_arrange(map_Adoption, map_Access, map_Openness, map_Coping, ncol = 2)
+
+```
+
+```{r}
+sum(is.na(nairobi_grouped))
+nairobi_grouped <- nairobi_grouped %>%
+  filter(!is.na(longitude) & !is.na(latitude))
+
+nairobi_grouped <- nairobi_grouped %>% filter(!ADM2_EN %in% c("Makadara", "Kibra"))
+coords <- cbind(nairobi_grouped$longitude, nairobi_grouped$latitude)  
+knn_nb <- knn2nb(knearneigh(coords, k = 4))  # Ensure same number of observations
+listw <- nb2listw(knn_nb, style = "W")
+
+```
+
+```{r}
+nrow(nairobi_grouped)  # Should match length of neighbors list
+length(listw$neighbours)
+
+```
+
+```{r}
+# Convert to spatial object
+comb_sp <- as_Spatial(nairobi_grouped)
+
+comb_nb<- poly2nb(comb_sp)
+comb_nb
+nb <- poly2nb(nairobi_grouped)
+# Create spatial weights matrix
+lw <- nb2listw(nb, style = "W")
+```
+
+```{r}
+colSums(is.na(nairobi_grouped))
+nrow(nairobi_grouped)   # Number of observations in dataset
+length(listw$neighbours)  # Number of areas in the spatial weights list
+
+```
+
+```{r}
+nairobi_grouped <- st_drop_geometry(nairobi_grouped)  # Works if using sf package
+str(nairobi_grouped)
+alias(lm(Adoption ~ ., data = nairobi_grouped))
+
+
+```
+
+```{r}
+# Run OLS regressions with renamed variables
+ols_Adoption <- lm(Adoption ~ ICTComp + Trainedu + Mdigtech + Newtech + Techemployees + Moperate + Fininstmain + Finbarrier, data = comb_sp)
+summary(ols_Adoption)
+
+ols_Access <- lm(Access ~ ICTComp + Trainedu + Mdigtech + Newtech + Techemployees + Moperate + Fininstmain + Finbarrier, data = comb_sp)
+summary(ols_Access)
+
+ols_Openness <- lm(Openness ~ ICTComp + Trainedu + Mdigtech + Newtech + Techemployees + Moperate + Fininstmain + Finbarrier, data = comb_sp)
+summary(ols_Openness)
+
+ols_Coping <- lm(Coping ~ ICTComp + Trainedu + Mdigtech + Newtech + Techemployees + Moperate + Fininstmain + Finbarrier, data = comb_sp)
+summary(ols_Coping)
+
+```
+
+Model 1: Adoption of New Technology Dependent variable (Y): Adoption R-squared: 0.654 → About 65.4% of the variance in adoption is explained by the predictors. This indicates a strong model. Significant predictors (p \< 0.05):
+
+ICTComp (x₁): Positive and significant (0.437, \*\*\*). → A 1 unit increase in ICT competency leads to a 0.437 increase in adoption, all else equal.
+
+Trainedu (x₂): Positive and significant (0.137, \*\*\*). → Willingness to undergo training increases adoption.
+
+Mdigtech (x₃): Positive and highly significant (0.289, \*\*\*). → Mastering digital transformation is a strong predictor of tech adoption.
+
+Not significant (p \> 0.05):
+
+Newtech (x₄), Techemployees (x₅) (borderline), Moperate (x₆), Fininstmain (x₈), Finbarrier (x₉)
+
+Takeaway: Adoption is most influenced by individual/organizational competency, training, and digital transformation capabilities, rather than external or contextual factors like finance or how many employees have technical skills.
+
+✅ Model 2: Access to New Technology Dependent variable (y₁₁): Access R-squared: 0.527 → Model explains 52.7% of variance in access. Decent, but lower than adoption.
+
+Significant predictors:
+
+ICTComp (x₁): Positive, significant (0.335, \*\*\*)
+
+Trainedu (x₂): Positive, significant (0.125, \*\*\*)
+
+Mdigtech (x₃): Strongest effect (0.361, \*\*\*)
+
+Marginal or not significant:
+
+Moperate (x₆): borderline (p = 0.0587)
+
+Others (Newtech, Techemployees, Fininstmain, Finbarrier): not significant.
+
+Takeaway: Again, access is driven more by internal capacity and skills (ICT, training, transformation mastery). Structural or resource-related variables don’t seem to limit access significantly.
+
+✅ Model 3: Openness to New Technology Dependent variable (y₁₂): Openness R-squared: 0.526 → About 52.6% variance explained.
+
+Significant predictors:
+
+ICTComp (x₁): Strong positive effect (0.378, \*\*\*)
+
+Trainedu (x₂): Positive effect (0.136, \*\*\*)
+
+Mdigtech (x₃): Strong predictor (0.301, \*\*\*)
+
+Techemployees (x₅): Slightly significant (0.00376, \*)
+
+Finbarrier (x₉): Significant (0.0669, \*)
+
+Others not significant:
+
+Newtech, Moperate, Fininstmain
+
+Takeaway: Openness is again strongly associated with ICT competency and transformation mastery. Interestingly, financial barriers (x₉) positively relate to openness – perhaps SMEs that recognize financial barriers are actively more open to technology as a coping mechanism.
+
+```{r}
+#model <- lm(Y ~ x_1 + x_2 + x_3 + x_4 + x_5 + x_6 + x_8 + x_9, data = comb_sp)
+residuals_model <- residuals(ols_Adoption)
+summary(residuals_model)
+
+```
+
+```{r}
+moran_test <- moran.test(residuals_model, listw)
+print(moran_test)
+
+```
+
+Interpretation Moran’s I = 0.0435: This is slightly positive, indicating some positive spatial autocorrelation. That means similar residual values (either underprediction or overprediction) tend to cluster spatially.
+
+p-value = 0.0103 (\< 0.05): Statistically significant. You reject the null hypothesis of spatial randomness.
+
+Conclusion: There's significant spatial autocorrelation in your residuals. This implies that your OLS model for Adoption misses a spatial component, and the residuals are not independent across space.
+
+```{r}
+# Load required package
+library(spatialreg)
+
+# Fit SAR models for each dependent variable with renamed variables
+sar_Adoption <- sacsarlm(Adoption ~ ICTComp + Trainedu + Mdigtech + Newtech + Techemployees + Moperate + Fininstmain + Finbarrier, 
+                         data = nairobi_grouped, listw = listw)
+
+sar_Access <- sacsarlm(Access ~ ICTComp + Trainedu + Mdigtech + Newtech + Techemployees + Moperate + Fininstmain + Finbarrier, 
+                       data = nairobi_grouped, listw = listw)
+
+sar_Openness <- sacsarlm(Openness ~ ICTComp + Trainedu + Mdigtech + Newtech + Techemployees + Moperate + Fininstmain + Finbarrier, 
+                         data = nairobi_grouped, listw = listw)
+
+sar_Coping <- sacsarlm(Coping ~ ICTComp + Trainedu + Mdigtech + Newtech + Techemployees + Moperate + Fininstmain + Finbarrier, 
+                       data = nairobi_grouped, listw = listw)
+
+# Display summaries
+summary(sar_Adoption)
+summary(sar_Access)
+summary(sar_Openness)
+summary(sar_Coping)
+
+```
+1. Adoption Model
+Spatial Effects:
+Rho (ρ): 0.1351, p < 0.001 → Significant spatial dependence in the dependent variable (i.e., Adoption in neighboring areas influences each other).
+
+Lambda (λ): -0.0612, p = 0.298 → Not significant. No strong spatial autocorrelation in errors.
+
+Model Fit:
+AIC = 1007.2 vs OLS AIC = 1023.2 → SAC model improves fit.
+
+LR Test = 19.962, p < 0.001 → SAC significantly improves over OLS.
+
+Significant Predictors:
+Predictor	Estimate	p-value	Interpretation
+ICTComp	0.42	<0.001	Strong positive effect – firms with higher ICT competence adopt more.
+Trainedu	0.13	<0.001	Training in education significantly boosts adoption.
+Mdigtech	0.28	<0.001	Use of digital tech promotes adoption.
+Techemployees	0.0024	0.047	Marginal effect – more tech-literate employees slightly boost adoption.
+2. Access Model
+Spatial Effects:
+Rho: 0.1484, p < 0.001 → Spatial dependence present.
+
+Lambda: -0.0664, p = 0.316 → Not significant.
+
+Model Fit:
+AIC = 1498.9 vs OLS AIC = 1510.5 → SAC improves fit.
+
+LR Test = 15.619, p < 0.001
+
+Significant Predictors:
+Predictor	Estimate	p-value	Interpretation
+ICTComp	0.32	<0.001	Key driver of access.
+Trainedu	0.11	<0.001	Educational training supports tech access.
+Mdigtech	0.35	<0.001	Digital tools increase access.
+Moperate	0.056	0.065	Marginally significant – operating model may affect access.
+3.  Openness Model
+Spatial Effects:
+Rho: 0.1051, p = 0.015 → Significant spatial dependence.
+
+Lambda: -0.0063, p = 0.922 → No spatial autocorrelation in errors.
+
+Model Fit:
+AIC = 1506.3 vs OLS AIC = 1513.6 → Slight improvement with SAC.
+
+LR Test = 11.233, p = 0.0036
+
+Significant Predictors:
+Predictor	Estimate	p-value	Interpretation
+ICTComp	0.36	<0.001	Strong influence on openness to technology.
+Trainedu	0.13	<0.001	Training increases openness.
+Mdigtech	0.30	<0.001	Digital tools foster openness.
+Techemployees	0.0037	0.015	Positive effect – tech-savvy staff matters.
+Finbarrier	0.067	0.021	Interesting: Perceived finance barriers might motivate openness (e.g., to seek alternatives).
+4.  Coping Model
+Spatial Effects:
+Rho: 0.1252, p < 0.001 → Spatial dependency exists.
+
+Lambda: -0.0686, p = 0.244 → Not significant.
+
+Model Fit:
+AIC = 1108.6 vs OLS AIC = 1120.9 → Better with SAC.
+
+LR Test = 16.388, p < 0.001
+
+Significant Predictors:
+Predictor	Estimate	p-value	Interpretation
+ICTComp	0.54	<0.001	Huge positive effect – critical for coping.
+Trainedu	0.15	<0.001	Also highly important.
+Mdigtech	0.18	<0.001	Enhances firms’ coping ability.
+
+
+```{r}
+# Fit the Spatial Autoregressive (SAR) 
+sar_Adoption <- lagsarlm(Adoption ~ ICTComp + Trainedu + Mdigtech + Newtech + Techemployees + Moperate + Fininstmain + Finbarrier, 
+                         data = nairobi_grouped, listw = listw)
+
+# Display summary
+summary(sar_Adoption)
+
+```
+🔁 Model Overview: Spatial Lag Model (SAR)
+The spatial lag model (SAR) accounts for spatial dependence in the dependent variable (here, Adoption). This means that the adoption rate in one region may depend not only on its own characteristics but also on the adoption rates in neighboring regions.
+
+🔢 Model Fit and Diagnostics
+Rho (ρ) = 0.11408, p < 0.00001
+
+Interpretation: There is a statistically significant and positive spatial lag effect. This suggests that adoption in one region is positively influenced by the adoption levels in neighboring regions.
+
+A rho value of 0.114 implies a modest but important level of spatial dependence.
+
+Log Likelihood = -492.13
+
+AIC = 1006.3 (vs. 1023.2 for linear model)
+
+Interpretation: Lower AIC than the OLS model suggests that the spatial lag model is a better fit for the data than the standard linear model.
+
+LM Test for Residual Autocorrelation: p = 0.33 (non-significant)
+
+This test checks whether spatial autocorrelation remains in the residuals.
+
+Interpretation: No significant spatial autocorrelation remains in the residuals, which means the model has adequately accounted for spatial effects.
+
+📊 Model Coefficients Interpretation
+Variable	Estimate	z-value	p-value	Interpretation
+(Intercept)	0.1325	1.37	0.1697	Not statistically significant.
+ICTComp	0.4217	17.94	<2e-16	Strong positive effect. A one-unit increase in ICT competence is associated with a 0.42 increase in adoption, holding other factors constant.
+Trainedu	0.1289	5.81	<1e-08	Significant positive effect. Training in education boosts adoption.
+Mdigtech	0.2824	11.53	<2e-16	Strong positive effect of digital technology usage on adoption.
+Newtech	0.0302	1.10	0.271	Not statistically significant. No strong evidence that access to new technology directly affects adoption.
+Techemployees	0.0024	1.92	0.0545	Marginally significant (just above 0.05). Having more tech-competent employees may help adoption.
+Moperate	0.0289	1.17	0.242	Not significant. Mode of operation doesn't significantly influence adoption.
+Fininstmain	0.0022	0.061	0.9515	Not significant. Using financial institutions for main transactions does not affect adoption.
+Finbarrier	0.0302	1.28	0.200	Not significant. Financial barriers not directly linked to adoption here.
+
+```{r}
+# Load required package
+library(spdep)
+
+# Fit Spatial Error Model (SEM) with renamed variables
+sem_Adoption <- spautolm(Adoption ~ ICTComp + Trainedu + Mdigtech + Newtech + Techemployees + Moperate + Fininstmain + Finbarrier, 
+                         data = nairobi_grouped, 
+                         listw = listw, 
+                         family = "SAR")
+
+# View results
+summary(sem_Adoption)
+
+
+```
+ Overview: SAR Model via spautolm
+This model, like lagsarlm, captures spatial dependence in the dependent variable (Adoption) by including a spatial lag (neighbors' influence), but it's estimated with a different method. While lagsarlm uses full ML estimation, spautolm uses an approximate method — often faster but slightly less efficient.
+
+🔢 Key Model Output
+🔁 Lambda (Spatial Autoregressive Coefficient)
+Lambda = 0.09998, SE = 0.04385, p = 0.0245
+
+Interpretation: There is significant and positive spatial dependence in adoption behavior. Lambda is the spatial autoregressive coefficient (ρ in lagsarlm) and indicates that adoption in one area is positively affected by neighboring areas' adoption.
+
+Though smaller than in lagsarlm (rho = 0.114), it's still meaningful and statistically significant.
+
+Spatial spillover exists, just weaker under this estimation method.
+
+📊 Model Coefficients (Effects of Explanatory Variables)
+Variable	Estimate	z-value	p-value	Significance & Interpretation
+(Intercept)	0.458	6.51	<0.00001	Significant baseline level of adoption when all predictors are zero.
+ICTComp	0.431	18.37	<0.00001	Very strong effect. ICT competence strongly increases adoption.
+Trainedu	0.137	6.15	<0.00001	More training leads to more adoption.
+Mdigtech	0.286	11.62	<0.00001	Using digital tech increases adoption.
+Newtech	0.030	1.07	0.283	Not significant. Access to new tech alone doesn't drive adoption.
+Techemployees	0.0022	1.78	0.075	Marginal. Tech-skilled staff may help, but evidence is weak.
+Moperate	0.031	1.25	0.211	Not significant. Mode of operation isn't a key factor.
+Fininstmain	0.014	0.39	0.695	Not significant. Using formal financial institutions doesn’t directly impact adoption.
+Finbarrier	0.029	1.22	0.221	Not significant. Financial barriers are not directly linked to adoption here.
+✅ Strong, positive predictors:
+
+ICT Competence, Training/Education, Digital Technology Usage
+These are robust and consistent across both SAR models.
+
+📉 Model Fit Statistics
+Log Likelihood = -499.06
+
+AIC = 1020.1
+
+Higher AIC than lagsarlm (AIC = 1006.3), indicating slightly worse fit.
+
+Residual Variance (σ²) = 0.13911
+
+Similar residual spread as the lagsarlm model (σ² = 0.13736), indicating good but not major improvement.
+
+LR Test (vs. OLS): 5.0615, p = 0.02446
+
+Confirms the spatial model is statistically better than the OLS model. But, the improvement is less dramatic compared to the lagsarlm model (which had a p < 0.00001).
+
+🧠 Summary: Comparing with lagsarlm
+Metric	lagsarlm	spautolm (SAR)
+Spatial Coefficient (ρ/λ)	0.114 (p < 0.00001)	0.100 (p = 0.0245)
+Best Fit (Lower AIC)	✅ 1006.3	❌ 1020.1
+Strong Predictors	ICTComp, Trainedu, Mdigtech (same for both)	
+Remaining Residual Autocorr.	✅ None	Not shown here
+Preferred Model	✅ lagsarlm	Still good, but less efficient
+✅ Final Verdict
+Both models confirm spatial spillovers in adoption behavior and highlight the importance of ICT competence, training, and digital tech use.
+
+However, lagsarlm is preferred based on:
+
+Better model fit (AIC)
+
+Stronger evidence of spatial dependence
+
+No residual spatial autocorrelation
+
+-   
+
+-   Variables
+
+y_11:  Access to new technology (Access)
+
+y_12 :Openness, reception, utilization of new technology (Openness)
+
+y_13 :Coping with modern technology (Coping)
+
+Y : Adoption of New Technology (Adoption)
+
+x_1 : Competency in ICT (ICTComp)
+
+x_2 : Willingness to continuous training education and qualification (Trainedu)
+
+x_3 : Mastering digital transformation (Mdigtech)
+
+x_4 : Percentage of employees with new technology (Newtech)
+
+x_5:Percentage of employees with digital technical skills (Techemployees)
+
+ x_6 : Percentage of SMEs operating online (Moperate)
+
+x_8: Financial Institutions as main financiers (Fininstmain)
+
+x_9: Finance is the main barrier (Finbarrier)    
+
+```{r}
+error_sem<-errorsarlm(Adoption ~ ICTComp + Trainedu + Mdigtech + Newtech + Techemployees + Moperate + Fininstmain + Finbarrier, 
+                      data = nairobi_grouped, listw = listw)
+summary(error_sem)
+```
+1. What is the SEM model doing?
+The Spatial Error Model (SEM) assumes that spatial dependence appears in the error term — i.e., there are unmeasured factors influencing adoption that are spatially correlated (e.g., neighboring areas share unmeasured contextual characteristics).
+
+The model takes the form:
+
+𝑦
+=
+𝑋
+𝛽
++
+𝑢
+,
+𝑢
+=
+𝜆
+𝑊
+𝑢
++
+𝜖
+y=Xβ+u,u=λWu+ϵ
+where λ is the spatial error coefficient, and W is the spatial weights matrix.
+
+🔁 Lambda (Spatial Error Coefficient)
+Lambda = 0.099975, SE = 0.0426
+
+z-value = 2.35, p-value = 0.0189
+
+🔎 Interpretation:
+
+There is significant spatial autocorrelation in the error terms — meaning that some spatial effects are not fully captured by your variables.
+
+The significant λ tells us that ignoring spatial structure would bias OLS estimates.
+
+But the value of λ is relatively modest, suggesting only a mild spatial error structure.
+
+📊 Coefficients (Effects of Variables)
+Variable	Estimate	z-value	p-value	Interpretation
+(Intercept)	0.458	6.51	<0.0001	High baseline adoption.
+ICTComp	0.431	18.37	<0.0001	ICT competence has a strong, positive effect on adoption.
+Trainedu	0.137	6.15	<0.0001	Training improves adoption.
+Mdigtech	0.286	11.62	<0.0001	Digital tech usage boosts adoption.
+Newtech	0.030	1.07	0.283	Not significant.
+Techemployees	0.0022	1.78	0.075	Weakly significant — may play a small role.
+Moperate	0.031	1.25	0.211	Not significant.
+Fininstmain	0.014	0.39	0.695	Not significant.
+Finbarrier	0.029	1.22	0.221	Not significant.
+✅ Key Takeaway: Same significant predictors as before:
+
+ICTComp, Trainedu, and Mdigtech remain robust.
+
+📉 Model Fit
+Metric	Value	Interpretation
+Log likelihood	-499.06	Similar to SAR
+AIC	1020.1 (vs. 1023.2 OLS)	Slightly better fit than OLS, but worse than lagsarlm (1006.3)
+Residual Variance (σ²)	0.13911 (σ = 0.37297)	Similar to SAR
+LR Test (vs. OLS)	5.0615, p = 0.02446	SEM is statistically better than OLS
+📚 Summary: SEM vs SAR vs Lag
+Model	Spatial Dependence Modeled In	Lambda / Rho	AIC	Fit Improvement	Preferred?
+lagsarlm	Dependent variable (y)	ρ = 0.114	1006.3	✅ Strong	✅ Best
+spautolm	Dependent variable (y)	λ = 0.09998	1020.1	✅ Moderate	Decent
+errorsarlm	Error term (u)	λ = 0.09998	1020.1	✅ Moderate	Decent
+✅ Final Interpretation
+SEM confirms that unmeasured spatial factors exist — but they are modestly influential.
+
+Your explanatory variables (ICT competence, training, digital tools) are strongly significant across all models.
+
+lagsarlm remains the best model based on fit (lowest AIC), strongest spatial autocorrelation evidence, and overall performance.
+
+```{r}
+error_sem1<-errorsarlm(Adoption ~ ICTComp + Trainedu + Mdigtech + Newtech + Techemployees + Moperate + Fininstmain + Finbarrier, 
+                      data = nairobi_grouped, listw = listw,etype="mixed")
+summary(error_sem1)
+```
+1. What is this model doing?
+This Spatial Error Model with Mixed Effects accounts for:
+
+Spatial autocorrelation in the error term (λ)
+
+Lagged independent variables, i.e., the values of the explanatory variables in neighboring regions (e.g., lag.ICTComp = average ICT competence in neighboring areas)
+
+This is especially useful when you suspect that both:
+
+There are unobserved spatial effects, and
+
+Some explanatory variables from nearby areas may influence the outcome in a given area.
+
+📊 Coefficient Interpretation
+🔹 Main Effects (local)
+Variable	Coeff	z-value	p-value	Interpretation
+(Intercept)	0.090	0.78	0.438	Not significant baseline adoption
+ICTComp	0.426	18.04	<0.001	Strong positive impact
+Trainedu	0.123	5.49	<0.001	Strong positive impact
+Mdigtech	0.284	11.60	<0.001	Strong positive impact
+Newtech	0.037	1.31	0.189	Not significant
+Techemployees	0.0021	1.71	0.087	Marginal (10% level)
+Moperate	0.033	1.31	0.190	Not significant
+Fininstmain	0.0092	0.25	0.802	Not significant
+Finbarrier	0.029	1.21	0.227	Not significant
+✅ Top predictors remain: ICT competence, training, and digital tech usage.
+
+🔹 Lagged Variables (neighboring effects)
+Lag Variable	Coeff	z	p-value	Interpretation
+lag.ICTComp	0.1006	2.06	0.040	Adoption in a unit is positively influenced by ICT competence in neighboring areas.
+lag.Trainedu	-0.0354	-0.78	0.436	Not significant
+lag.Mdigtech	0.0604	1.15	0.251	Not significant
+lag.Newtech	-0.055	-1.09	0.274	Not significant
+lag.Techemployees	0.0025	1.18	0.237	Not significant
+lag.Moperate	-0.0382	-0.80	0.426	Not significant
+lag.Fininstmain	-0.0946	-1.32	0.187	Not significant
+lag.Finbarrier	0.0316	0.73	0.463	Not significant
+✅ Only one spatial lag is significant:
+
+lag.ICTComp — indicates a positive spatial spillover: businesses in an area adopt more when neighboring areas have higher ICT competence.
+
+🔁 Lambda (Spatial Error Dependence)
+λ = 0.073, SE = 0.0433
+
+p-value = 0.094 (marginally significant at the 10% level)
+
+🔎 Interpretation:
+
+There’s mild spatial correlation in the error term, suggesting that some unobserved spatial factors still influence adoption.
+
+Not very strong, but enough to matter.
+
+📈 Model Fit & Comparison
+Metric	Value	Interpretation
+Log Likelihood	-487.67	Better than previous
+AIC	1013.3	✅ Lower than SEM (1020.1) and SAR (1006.3 still lowest)
+Residual Variance (σ²)	0.1365	Lowest so far
+LR test (vs. OLS)	2.72, p = 0.099	Some improvement over OLS
+📌 Compared to previous models:
+
+Better than standard SEM and spatial lag models in capturing neighborhood effects via lagged predictors.
+
+However, lagsarlm (SAR) still has the lowest AIC and better overall fit.
+
+✅ Summary Interpretation
+The Mixed Error Model suggests that:
+
+Adoption is driven by local factors, especially:
+
+ICT competence
+
+Training
+
+Digital technology use
+
+ICT competence in neighboring areas also matters — indicating positive spatial spillover.
+
+Other spatially lagged effects are not significant.
+
+Spatial error autocorrelation is mild but present.
+
+📊 Recommendation
+If you want:
+
+Best model fit → Stick with lagsarlm.
+
+Deeper insight into spillovers → This model adds useful understanding, especially about ICT spillovers.

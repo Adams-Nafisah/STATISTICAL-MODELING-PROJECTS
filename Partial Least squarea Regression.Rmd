@@ -1,0 +1,250 @@
+---
+title: "Partial Least squares regression"
+author: "Nafisah Adams"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### **Steps to Perform Partial Least Squares**
+
+In practice, the following steps are used to perform partial least squares.
+
+**1.** Standardize the data such that all of the predictor variables and the response variable have a mean of 0 and a standard deviation of 1. This ensures that each variable is measured on the same scale.
+
+**2.** Calculate Z~1~, … , Z~M~ to be the *M* linear combinations of the original *p* predictors.
+
+-   Z~m~ = ΣΦ~jm~X~j~ for some constants Φ~1m~, Φ~2m~, Φ~pm~, m = 1, …, M.
+
+-   To calculate Z~1~, set Φ~j1~ equal to the coefficient from the simple linear regression of Y onto X~j~is the linear combination of the predictors that captures the most variance possible.
+
+-   To calculate Z~2~, regression each variable on Z~1~ and take the residuals. Then calculate Z~2~ using this orthogonalized data in exactly the same manner that Z~1~ was calculated.
+
+-   Repeat this process *M* times to obtain the *M* PLS components.
+
+-   Each component is a weighted sum of the predictors:
+
+    ![](images/clipboard-1126464913.png)
+
+    Where:
+
+    -   Zm is the **m-th PLS component**
+
+    -   Φjm are the **weights (loading coefficients)**
+
+    -   Xj are the **original predictor variables**
+
+**3.** Use the method of least squares to fit a linear regression model using the PLS components Z~1~, … , Z~M~ as predictors.
+
+**4.** Lastly, use [k-fold cross-validation](https://www.statology.org/k-fold-cross-validation/) to find the optimal number of PLS components to keep in the model. The “optimal” number of PLS components to keep is typically the number that produces the lowest test mean-squared error (MSE).
+
+ASSUMPTIONS OF PLS
+
+Multicollinearity:
+
+Unlike traditional regression methods, PLS is designed to work well even when predictor variables are highly correlated with each other, as it extracts latent variables that capture the underlying relationships between these correlated variables.
+
+Dimensionality:
+
+PLS is particularly useful when dealing with a large number of predictor variables, as it reduces the dimensionality of the data by extracting latent variables.
+
+Linearity:
+
+While PLS can handle some non-linearity, it still assumes a mostly linear relationship between the latent variables and the response variable.
+
+Sample size:
+
+Sufficient sample size is important to ensure stable estimates of the latent variables and regression coefficients.
+
+```{r}
+library(pls)
+library(readxl)
+internet_usage<-read_excel("C:\\Users\\PC\\Desktop\\spring2025\\internetlogit.xlsx")
+head(internet_usage)
+```
+
+```{r}
+cor(internet_usage)
+```
+
+```{r}
+#make this example reproducible
+set.seed(1)
+
+#fit PCR model
+model <- plsr(usage ~age+webpages+videohours+income, data=internet_usage, scale=TRUE, validation="CV")
+summary(model)
+```
+
+```{r}
+#visualize cross-validation plots
+validationplot(model)
+validationplot(model, val.type="MSEP")
+validationplot(model, val.type="R2")
+```
+
+initially we were using the internet logit data set on blackboard to but the the response variable which is usage doesn't follow the rules of PLS because it is categorical and PLS doesn't work well with categorical variables as the response variable, so we changed our data set to the telco data set and using tenure as our response variable since its continous.
+
+Loading the dataset and doing the necessary preprocessing needed since the data set wasn't clean the way we wanted it.
+
+```{r}
+telco<-read_excel("C:\\Users\\PC\\Downloads\\telco.xlsx")
+head(telco)
+#dropping columns with missing values
+library(tidyverse)
+telco_clean <- telco %>% select(-logtoll, -logequi,-logcard,-logwire)
+head(telco_clean)
+str(telco_clean)
+telco_clean$marital <- as.numeric(as.factor(telco_clean$marital))
+telco_clean$gender <- as.numeric(as.factor(telco_clean$gender))
+telco_clean$ed <- as.numeric(as.factor(telco_clean$ed))
+
+
+is.na(TRUE)
+```
+
+Running the correlation test to see if the data set has multicollinearity issues, that is if two or more predictor variables were highly correlated. Since of of the issues PLS solves very well is multicollinearity. And yes variables like wireten and wiremon were highly correlated and so many others. This proves that PLS can be best suited for this data set more than the initial one
+
+```{r}
+cor_matrix<-cor(telco_clean)
+print(cor_matrix)
+library(corrplot)
+
+# Visualize the correlation matrix
+corrplot(cor_matrix, method = "color", tl.cex = 0.7, addCoef.col = "black")
+
+```
+
+We then go ahead to run the plsr function in r which creates our model by standardizing the data set and also using cross validation to calculate the RMSEP.
+
+This helps us select the number of components that are best suited for our model, the lesser the value for the RMSEP the better it is for the model. Like for our case,
+
+**1. VALIDATION: RMSEP**
+
+This table tells us the test RMSE calculated by the k-fold cross validation. We can see the following:
+
+-   If we only use the intercept term in the model, the test RMSE is 21.37
+
+-   If we add in the first PLS component, the test RMSE drops to **12.05.**
+
+-   If we add in the second PLS component, the test RMSE drops to **10.99.**
+
+-   if we add more pls components, the test RMSE keeps dropping till it gets to the 15th components and starts stablizing with very little changes or difference in the test value.
+
+-   Thus, it appears that it would be optimal to only use 15 PLS components in the final model.
+
+```{r}
+#make this example reproducible
+set.seed(1)
+
+#fit PCR model
+model1 <- plsr(tenure ~., data=telco_clean, scale=TRUE, validation="CV")
+summary(model1)
+```
+
+We go a head to visualise the test results alongside with MSE and R2
+
+```{r}
+#visualize cross-validation plots
+validationplot(model1)
+validationplot(model1, val.type="MSEP")
+validationplot(model1, val.type = "R2")
+```
+
+After selecting the optimal number of PLS components for our model, we proceed by splitting our dataset into training and testing sets to make predictions.
+
+Our RMSE value after prediction is 6.3733. This value is acceptable if the scale is out of 100 but problematic if it's out of 10. To better assess this, we calculate the relative RMSE, which turns out to be 18%. This indicates that our model has an 18% error rate.
+
+To further reduce this error, we can apply techniques such as feature selection using regression methods like Lasso regression. This helps eliminate irrelevant or redundant features that do not contribute significantly to the model. Additionally, we can compute the Variance Inflation Factor (VIF) for the variables. Features with a VIF greater than 10 indicate multicollinearity and can be removed to improve the model's performance and reduce error.
+
+```{r}
+
+# Define 80-20 train-test split
+set.seed(123)  # Ensures reproducibility
+train_index <- sample(1:nrow(telco_clean), size = 0.8 * nrow(telco_clean), replace = FALSE)
+train <- telco_clean[train_index, ]
+test <- telco_clean[-train_index, ]
+
+# Define predictor variables (excluding target 'tenure')
+predictors <- c("cardmon", "wiremon", "longdistanceovertenure", "tollten", 
+                "equipten", "cardten", "wireten", "loglong", "lninc", 
+                "marital", "address", "income", "ed", "employ", 
+                "gender", "reside", "tollmon", "equipmon", "age", "longmon")
+
+# Ensure only existing predictors are used
+available_predictors <- intersect(predictors, names(telco_clean))
+
+# Define response variable
+response <- "tenure"
+
+# Separate features (X) and target (y)
+train_X <- train[, available_predictors, drop = FALSE]
+train_y <- as.numeric(train[[response]])  # Ensure numeric response
+test_X <- test[, available_predictors, drop = FALSE]
+test_y <- as.numeric(test[[response]])  # Ensure numeric response
+
+# Convert all necessary predictors to numeric
+train_X <- data.frame(lapply(train_X, function(x) as.numeric(as.character(x))))
+test_X <- data.frame(lapply(test_X, function(x) as.numeric(as.character(x))))
+
+# Fit PLS model
+model <- plsr(tenure ~ ., data = train, scale = TRUE, validation = "CV")
+
+# Find the optimal number of components
+best_ncomp <- which.min(model$validation$PRESS)
+
+# Ensure best_ncomp does not exceed max possible components
+best_ncomp <- min(best_ncomp, ncol(train_X))
+
+# Predict on test set using optimal components
+pcr_pred <- predict(model, newdata = test_X, ncomp = best_ncomp)
+
+# Convert predictions to numeric vector
+pcr_pred <- as.numeric(pcr_pred)  # Ensures it's not a list
+
+# Ensure test_y has matching dimensions
+test_y <- test_y[1:length(pcr_pred)]  # Adjust size if necessary
+
+# Calculate RMSE
+rmse <- sqrt(mean((pcr_pred - test_y)^2, na.rm = TRUE))
+
+# Print RMSE value
+print(paste("Test RMSE:", round(rmse, 4)))
+
+
+```
+
+```{r}
+# Compute Mean of Actual Values (Tenure)
+mean_tenure <- mean(test_y, na.rm = TRUE)
+
+# Compute Relative RMSE
+relative_rmse <- (rmse / mean_tenure) * 100
+
+# Print Relative RMSE
+print(paste("Relative RMSE:", round(relative_rmse, 2), "%"))
+
+```
+
+```{r}
+library(car)
+
+# Fit a linear model
+lm_model <- lm(tenure ~ ., data = telco_clean)
+
+# Compute VIF
+vif_values <- vif(lm_model)
+print(vif_values)
+
+# Drop variables with VIF > 10 (high collinearity)
+telco_clean <- telco_clean[, !names(telco_clean) %in% names(vif_values[vif_values > 10])]
+
+
+```
+
+TERMS AND THEIR MEANINGS
+
+![](images/clipboard-3520117967.png)

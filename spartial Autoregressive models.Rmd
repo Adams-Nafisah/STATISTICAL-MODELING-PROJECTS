@@ -1,0 +1,292 @@
+---
+title: "SPARTIALAUTOREGRESSIVE MODELS"
+author: "Nafisah Adams"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#install.packages('SpatialEpi',depend=TRUE)
+```
+
+These libraries (`tmap`, `SpatialEpi`, `sf`, `spdep`) provide the tools needed for spatial analysis and mapping. The Pennsylvania lung cancer dataset (`pennLC`) contains geographic information and smoking data — the core variables for the study. This stage sets the foundation for everything that follows.
+
+```{r}
+# Make sure the necessary packages have been loaded
+#install.packages("tmap")
+#install.packages("tmaptools")
+library(tmap)
+library(tmaptools)
+library(SpatialEpi)
+
+# Read in the Pennsylvania lung cancer data
+data(pennLC)
+# Extract the SpatialPolygon info
+penn.state.latlong <- pennLC$spatial.polygon
+
+library(sf)
+# Convert to an sf object
+penn.state.sf <- st_as_sf(penn.state.latlong)
+# Reproject to UTM zone 17N (EPSG code can be specified; here, using 3724 as given)
+penn.state.sf <- st_transform(penn.state.sf, crs = 3724)
+# Convert back to a Spatial object if needed
+penn.state.utm <- as(penn.state.sf, "Spatial")
+
+# Obtain the smoking rates
+penn.state.utm$smk <- pennLC$smoking$smoking * 100
+# Convert to sf object (this will add the geometry column)
+penn.state.sf <- st_as_sf(penn.state.utm)
+
+# Draw the choropleth map using tmap v4 syntax
+tm_shape(penn.state.sf) +
+  tm_polygons(fill = "smk", fill.legend = tm_legend(title = "% of Popn.")) 
+```
+
+Visualizing smoking rates on a map helps identify patterns across counties — like clusters of high or low smoking rates. This map is our first look at how smoking behavior varies spatially, which is key for understanding any potential spatial dependence in health outcomes like lung cancer.
+
+**Creating Randomized Data**:\
+By scrambling the smoking rate data and plotting both the real and fake data, this stage helps us see if the observed spatial pattern in smoking rates is real or could happen by chance. It also helps us visually distinguish true spatial clustering from random noise.
+
+```{r}
+# Set up a set of five 'fake' smoking update rates as well as the real one
+# Create new columns in penn.state.utm for randomised data
+# Here the seed 4676 is used.  Use a different one to get an unknown outcome.
+
+
+# Create new columns for random smoking rates
+set.seed(123)
+penn.state.sf$smk_rand1 <- sample(penn.state.sf$smk)
+penn.state.sf$smk_rand2 <- sample(penn.state.sf$smk)
+penn.state.sf$smk_rand3 <- sample(penn.state.sf$smk)
+penn.state.sf$smk_rand4 <- sample(penn.state.sf$smk)
+penn.state.sf$smk_rand5 <- sample(penn.state.sf$smk)
+
+# Scramble the variables
+vars <- sample(c('smk', 'smk_rand1', 'smk_rand2', 'smk_rand3', 'smk_rand4', 'smk_rand5'))
+
+# Identify the real data
+real.data.i <- which(vars == 'smk')
+
+# Plot the maps in a 3x2 grid
+tm_shape(penn.state.sf) +
+  tm_polygons(fill = vars, fill.legend.show = FALSE) +
+  tm_layout(title = 1:6, title.position = c("right", "top"))
+```
+
+```{r}
+real.data.i
+```
+
+NEIGBOURS AND LAGGED MEAN PLOTS
+
+-   **Queen’s Case:**
+
+    -   Think of a **chessboard’s queen** — she can move in **any direction** (side, corner, or diagonal).
+
+    -   In this method, **two counties are neighbors if they share any boundary point**, whether it’s a side or a corner.
+
+    -   This approach captures **more neighbors** because **even touching at a corner counts**.
+
+```{r}
+require(spdep)
+penn.state.nb <- poly2nb(penn.state.utm)
+penn.state.nb
+```
+
+-   **346 nonzero links** means **346 neighboring relationships** were identified.
+
+<!-- -->
+
+-   **Each county has about 5.16 neighbors on average**.
+
+```{r}
+# Create a SpatialLinesDataFrame showing the Queen's case contiguities
+# Convert SpatialPolygonsDataFrame to sf
+penn.state.sf <- st_as_sf(penn.state.utm)
+
+# Create a SpatialLinesDataFrame showing Queen's case contiguities
+penn.state.net <- nb2lines(penn.state.nb, coords = coordinates(penn.state.utm))
+
+# Convert SpatialLinesDataFrame to sf
+penn.state.net.sf <- st_as_sf(penn.state.net)
+
+# Assign projection (assuming UTM Zone 17N)
+st_crs(penn.state.sf) <- 3724
+st_crs(penn.state.net.sf) <- 3724
+
+# Plot the borders and the network
+tm_shape(penn.state.sf) + tm_borders(col = 'lightgrey') +
+  tm_shape(penn.state.net.sf) + tm_lines(col = 'red')
+```
+
+**Rook’s Case:**
+
+-   Like a **chessboard’s rook**, this method only allows movement in **straight lines** (rows or columns).
+
+-   **Two counties are neighbors only if they share a common side (border)** — no diagonal neighbors.
+
+```{r}
+# Calculate Rook’s case neighbors
+penn.state.nb2 <- poly2nb(penn.state.utm, queen = FALSE)
+
+# Convert neighbors to SpatialLinesDataFrame
+penn.state.net2 <- nb2lines(penn.state.nb2, coords = coordinates(penn.state.utm))
+
+# Convert both SpatialLinesDataFrame and SpatialPolygonsDataFrame to sf
+penn.state.sf <- st_as_sf(penn.state.utm)
+penn.state.net.sf <- st_as_sf(penn.state.net)
+penn.state.net2.sf <- st_as_sf(penn.state.net2)
+
+# Set CRS for all
+st_crs(penn.state.sf) <- 3724
+st_crs(penn.state.net.sf) <- 3724
+st_crs(penn.state.net2.sf) <- 3724
+
+# Plot the counties, Queen’s and Rook’s case neighbors
+tm_shape(penn.state.sf) + tm_borders(col = 'lightgrey') +
+  tm_shape(penn.state.net.sf) + tm_lines(col = 'blue', lwd = 2) +
+  tm_shape(penn.state.net2.sf) + tm_lines(col = 'yellow')
+```
+
+```{r}
+# Convert the neighbour list to a listw object - use Rook's case...
+penn.state.lw <- nb2listw(penn.state.nb2)
+penn.state.lw
+```
+
+```{r}
+# Calculate lagged means
+penn.state.utm$smk.lagged.means <- lag.listw(penn.state.lw, penn.state.utm$smk)
+
+# Convert SpatialPolygonsDataFrame to sf
+penn.state.sf <- st_as_sf(penn.state.utm)
+
+# Assign projection (UTM Zone 17N)
+st_crs(penn.state.sf) <- 3724
+
+# Plot lagged smoking rates
+tm_shape(penn.state.sf) +
+  tm_polygons(fill = 'smk.lagged.means', fill.legend = tm_legend(title = '% of Popn.')) +
+  tm_layout(legend.bg.color = "white")
+```
+
+```{r}
+with(data.frame(penn.state.utm), {
+  plot(smk,smk.lagged.means,asp=1,xlim=range(smk),ylim=range(smk))
+  abline(a=0,b=1)
+  abline(v=mean(smk),lty=2)
+  abline(h=mean(smk.lagged.means),lty=2)
+})
+```
+
+```{r}
+moran.plot(penn.state.utm$smk,penn.state.lw)
+
+```
+
+MORAN'S I : AN INDEX OF AUTOCORRELATION
+
+```{r}
+moran.test(penn.state.utm$smk,penn.state.lw)
+
+```
+
+-   **Moran’s I statistic (0.404)**:
+
+    -   This value ranges between **-1 and +1**:
+
+        -   **+1** means **strong positive spatial autocorrelation** — nearby counties tend to have **similar smoking rates** (either high or low).
+
+        -   **0** means **no spatial autocorrelation** — smoking rates are **randomly distributed** across counties
+
+        -   **-1** means **negative spatial autocorrelation** — neighboring counties have **very different rates** (like a checkerboard pattern).
+
+    -   The **0.404** we got is **a clear positive value**, showing that counties with similar smoking rates **tend to cluster** together.
+
+    **p-value (3.02e-08)**:
+
+    -   This **tiny p-value (\< 0.001)** means the result is **highly significant** — there’s **almost no chance** this spatial pattern is due to random chance.
+
+    -   So the clustering of smoking rates we see **is real and meaningful**.
+
+```{r}
+moran.range <- function(lw) {
+  wmat <- listw2mat(lw)
+  return(range(eigen((wmat + t(wmat))/2)$values))
+}
+moran.range(penn.state.lw)
+```
+
+```{r}
+moran.test(penn.state.utm$smk,penn.state.lw,randomisation=FALSE)
+
+```
+
+A SIMMULATION BASED APPROACH
+
+```{r}
+#moran.mc(penn.state.utm$smk,penn.state.lw,10000)
+
+```
+
+```{r}
+library(spatialreg)
+sar.res <- spautolm(smk~1,listw=penn.state.lw,data=penn.state.utm)
+sar.res
+```
+
+```{r}
+sar.res$lambda.se
+
+```
+
+```{r}
+sar.res$lambda + c(-2,2)*sar.res$lambda.se
+
+```
+
+```{r}
+#head(pennLC$data)
+#tail(pennLC$data)
+```
+
+```{r}
+#library(plyr)
+#require(plyr)
+#totcases <- ddply(pennLC$data,c("county"),numcolwise(sum))
+#head(totcases)
+
+```
+
+```{r}
+#totcases <- transform(totcases,rate=10000*cases/population)
+#head(totcases)
+```
+
+```{r}
+# Check the distribution of rates
+#boxplot(totcases$rate,horizontal=TRUE,
+       # xlab='Cancer Rate (Cases per 10,000 Popn.)')
+```
+
+```{r}
+sar.mod <- spautolm(rate~sqrt(penn.state.utm$smk),listw=penn.state.lw,
+                    weight=population,data=totcases)
+summary(sar.mod)
+```
+
+### **Final Summary of Interpretation:**
+
+-   **Smoking rates are a strong predictor of lung cancer rates** across Pennsylvania counties (**p \< 0.001**).
+
+-   **There is significant spatial dependence (Lambda = 0.38, p = 0.012)**, meaning **counties with high lung cancer rates are near other counties with high rates**.
+
+-   **Ignoring spatial patterns would have biased our understanding of the smoking-cancer relationship**.
+
+-   **Smoking intervention policies may need to target clusters of high-smoking and high-cancer counties.**
+
+This **confirms that smoking is a key driver of lung cancer rates**, and **geography matters when studying health patterns**.

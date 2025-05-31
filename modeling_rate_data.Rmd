@@ -1,0 +1,58 @@
+---
+title: "Modeling count data"
+author: "Nafisah Adams"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(MASS)
+?ships
+View(ships)
+```
+
+```{r}
+#subsetting the data for only service more than zero
+ships <- ships[ships$service != 0,]
+#fitting the  model using GLM and offset
+m <- glm(incidents ~ type + offset(log(service)),
+data = ships,
+family = poisson)
+summary(m)
+```
+
+Interpreting the Coefficients:
+
+-   `(Intercept) = -5.4202`: This is the log of the incident rate for type A ships when the offset is accounted for. So type A ships experience about 0.0044 incidents per unit of service.
+
+-   `typeB = -0.8837`: This is the log difference in incident rate between type B and type A. Converting it to the incident rate ratio: Type B ships have about 41.3% of the incident rate of type A ships (a 58.7% decrease).
+
+-   `typeC = -0.8260`: Type C ships have 43.8% of the incident rate of type A ships (a 56.2% decrease).
+
+-   `typeD = -0.1459`: Type D ships have about 86.4% of the incident rate of type A ships — not a big difference. Also, p = 0.6118 shows this is not statistically significant.
+
+-   `typeE = 0.3429`: Type E ships have about 1.41 times the incident rate of type A ships (a 40.9% increase), though p = 0.1439 suggests this isn’t statistically significant either.
+
+Statistical Significance:
+
+-   `typeB` and `typeC` have significant negative coefficients — their incident rates are significantly lower than type A ships.
+
+-   `typeD` and `typeE` are not significantly different from type A.
+
+Model Fit:
+
+-   Null deviance = 146.328 (how well a model with only the intercept fits the data).
+
+-   Residual deviance = 90.889 (how well the current model fits). A big drop in deviance suggests the model fits better than a baseline model, but there’s still room for improvement.
+
+-   AIC = 198.76: A measure of model quality (lower is better).
+
+```{r}
+exp(coef(m))
+```
+
+typeB and typeC have lower incident rates compared to type A, typeD is similar, and typeE shows a higher but not significant rate.
